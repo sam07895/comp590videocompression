@@ -7,21 +7,29 @@ pub struct Range {
 
 impl Range {
     pub fn new(buffer_width: u32) -> Self {
-        if buffer_width > 63 || buffer_width < 2{
+        if buffer_width > 63 || buffer_width < 2 {
             panic!("Illegal range buffer width")
         }
 
         Self {
             bw: buffer_width,
-            high: (!0x0) >> (64-buffer_width),
+            high: (!0x0) >> (64 - buffer_width),
             low: 0x0,
         }
     }
 
-    fn hob_mask(&self) -> u64 {0x1 << (self.bw-1)}
-    fn range_mask(&self) -> u64 {0xffffffffffffffff >> (64-self.bw)}
-    fn three_quarter_mark(&self) -> u64 {0x3 << (self.bw-2)}
-    fn quarter_mark(&self) -> u64 {(!self.three_quarter_mark()) & self.range_mask()}
+    fn hob_mask(&self) -> u64 {
+        0x1 << (self.bw - 1)
+    }
+    fn range_mask(&self) -> u64 {
+        0xffffffffffffffff >> (64 - self.bw)
+    }
+    fn three_quarter_mark(&self) -> u64 {
+        0x3 << (self.bw - 2)
+    }
+    fn quarter_mark(&self) -> u64 {
+        (!self.three_quarter_mark()) & self.range_mask()
+    }
 
     pub fn width(&self) -> u64 {
         self.high - self.low + 1
@@ -30,11 +38,11 @@ impl Range {
     pub fn low(&self) -> u64 {
         self.low
     }
-    
+
     pub fn high(&self) -> u64 {
         self.high
     }
-    
+
     pub fn reduce(&mut self, h: u64, l: u64) {
         if h > self.high || h < l || l < self.low {
             panic!("Illegal range reduction");

@@ -18,9 +18,52 @@ use toy_ac::symbol_model::VectorCountSymbolModel;
 
 use ffmpeg_sidecar::event::StreamTypeSpecificData::Video;
 
+const CONTEXT_COUNT: usize = 256;
+const DEFAULT_PIXEL: u8 = 128;
+
+fn abs_diff(a: u8, b: u8) -> u8 {
+    (a as i16 - b as i16).unsigned_abs() as u8
+}
+
+fn get_context_and_prediction(
+    row: u32,
+    col: u32,
+    width: u32,
+    prior_frame: &[u8],
+    current_partial: &[u8],
+) -> (usize, u8) {
+    let idx = (row * width + col) as usize;
+    let prior = prior_frame[idx];
+    let left = if col > 0 {
+        current_partial[(row * width + (col - 1)) as usize]
+    } else {
+        prior
+    };
+    let up = if row > 0 {
+        current_partial[((row - 1) * width + col) as usize]
+    } else {
+        prior
+    };
+
+    let prediction = ((left as u16 + up as u16 + prior as u16) / 3) as u8;
+
+    let spatial_bin = (abs_diff(left, up) >> 4) as usize;
+    let temporal_bin = (abs_diff(prior, prediction) >> 4) as usize;
+    let context = (spatial_bin << 4) | temporal_bin;
+
+    (context, prediction)
+}
+
+fn make_models() -> Vec<VectorCountSymbolModel<i32>> {
+    (0..CONTEXT_COUNT)
+        .map(|_| VectorCountSymbolModel::new((0..=255).collect()))
+        .collect()
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Make sure ffmpeg is installed
-    ffmpeg_sidecar::download::auto_download().unwrap();
+    // Best effort: in restricted/offline environments this may fail, but
+    // ffmpeg may already be present or previously downloaded.
+    let _ = ffmpeg_sidecar::download::auto_download();
 
     // Command line options
     // -verbose, -no_verbose                Default: -no_verbose
@@ -91,7 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(height != 0);
 
     // Set up initial prior frame as uniform medium gray (y = 128)
-    let mut prior_frame = vec![128 as u8; (width * height) as usize];
+    let mut prior_frame = vec![DEFAULT_PIXEL; (width * height) as usize];
 
     let output_file = match File::create(&output_file_path) {
         Err(_) => panic!("Error opening output file"),
@@ -105,8 +148,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut enc = Encoder::new();
 
-    // Set up arithmetic coding context(s)
-    let mut pixel_difference_pdf = VectorCountSymbolModel::new((0..=255).collect());
+    // Set up arithmetic coding contexts (exactly 256)
+    let mut residual_models = make_models();
 
     // Process frames
     for frame in iter.filter_frames() {
@@ -116,6 +159,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         } else if frame.frame_num < skip_count + count {
             let current_frame: Vec<u8> = frame.data; // <- raw pixel y values
+            let mut encoded_partial_frame = vec![DEFAULT_PIXEL; (width * height) as usize];
 
             let bits_written_at_start = enc.bits_written();
 
@@ -123,18 +167,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for r in 0..height {
                 for c in 0..width {
                     let pixel_index = (r * width + c) as usize;
+                    let (context, prediction) = get_context_and_prediction(
+                        r,
+                        c,
+                        width,
+                        &prior_frame,
+                        &encoded_partial_frame,
+                    );
 
-                    // Encode difference with same pixel in prior frame.
-                    // Normalize and modulate difference to 8-bit range.
-                    let pixel_difference = (((current_frame[pixel_index] as i32)
-                        - (prior_frame[pixel_index] as i32))
-                        + 256)
-                        % 256;
+                    let residual =
+                        ((current_frame[pixel_index] as i32 - prediction as i32) + 256) % 256;
 
-                    enc.encode(&pixel_difference, &pixel_difference_pdf, &mut bw);
-
-                    // Update context
-                    pixel_difference_pdf.incr_count(&pixel_difference);
+                    enc.encode(&residual, &residual_models[context], &mut bw);
+                    residual_models[context].incr_count(&residual);
+                    encoded_partial_frame[pixel_index] = current_frame[pixel_index];
                 }
             }
 
@@ -178,30 +224,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut dec = Decoder::new();
 
-        let mut pixel_difference_pdf = VectorCountSymbolModel::new((0..=255).collect());
+        let mut residual_models = make_models();
 
         // Set up initial prior frame as uniform medium gray
-        let mut prior_frame = vec![128 as u8; (width * height) as usize];
+        let mut prior_frame = vec![DEFAULT_PIXEL; (width * height) as usize];
 
-        'outer_loop: 
-        for frame in iter.filter_frames() {
-            if frame.frame_num < skip_count + count {
+        'outer_loop: for frame in iter.filter_frames() {
+            if frame.frame_num < skip_count {
+                continue;
+            } else if frame.frame_num < skip_count + count {
                 if verbose {
                     print!("Checking frame: {} ... ", frame.frame_num);
                 }
 
                 let current_frame: Vec<u8> = frame.data; // <- raw pixel y values
+                let mut decoded_frame = vec![DEFAULT_PIXEL; (width * height) as usize];
 
                 // Process pixels in row major order.
                 for r in 0..height {
                     for c in 0..width {
                         let pixel_index = (r * width + c) as usize;
-                        let decoded_pixel_difference = dec.decode(&pixel_difference_pdf, &mut br).to_owned();
-                        pixel_difference_pdf.incr_count(&decoded_pixel_difference);
+                        let (context, prediction) =
+                            get_context_and_prediction(r, c, width, &prior_frame, &decoded_frame);
+                        let decoded_residual =
+                            dec.decode(&residual_models[context], &mut br).to_owned();
+                        residual_models[context].incr_count(&decoded_residual);
 
-                        let pixel_value = (prior_frame[pixel_index] as i32 + decoded_pixel_difference) % 256;
+                        let pixel_value = ((prediction as i32 + decoded_residual) % 256) as u8;
+                        decoded_frame[pixel_index] = pixel_value;
 
-                        if pixel_value != current_frame[pixel_index] as i32 {
+                        if pixel_value != current_frame[pixel_index] {
                             println!(
                                 " error at ({}, {}), should decode {}, got {}",
                                 c, r, current_frame[pixel_index], pixel_value
@@ -212,7 +264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 println!("correct.");
-                prior_frame = current_frame;
+                prior_frame = decoded_frame;
             } else {
                 break 'outer_loop;
             }

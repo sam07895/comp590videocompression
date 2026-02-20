@@ -72,14 +72,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match next_byte {
             Ok(b) => {
                 if log_flag {
-                    let (int_start, int_end) = sm.interval(&b);        
+                    let (int_start, int_end) = sm.interval(&b);
 
                     let mut lw = log_writer.unwrap();
                     write!(
                         &mut lw,
                         "Symbol: {}, IntStart: {:10}, IntEnd: {:10}, Total: {:10}, ",
-                        if b == 10 {format!("\\n ")} else {format!("'{}'", (b as u8 as char))},  
-                        int_start, int_end, sm.total()
+                        if b == 10 {
+                            format!("\\n ")
+                        } else {
+                            format!("'{}'", (b as u8 as char))
+                        },
+                        int_start,
+                        int_end,
+                        sm.total()
                     )?;
                     log_writer = Some(lw);
                 }
@@ -92,7 +98,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     write!(
                         &mut lw,
                         "High: {:#x}, Low: {:#010x}\n",
-                        enc.high(), enc.low()
+                        enc.high(),
+                        enc.low()
                     )?;
                     log_writer = Some(lw);
                 }

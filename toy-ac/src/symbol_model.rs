@@ -9,12 +9,10 @@ pub struct VectorCountSymbolModel<T: std::cmp::Eq> {
     symbols: Vec<T>,
     counts: Vec<u32>,
     total: u32,
-    norm_count: u32
+    norm_count: u32,
 }
 
 impl<T: std::cmp::Eq> VectorCountSymbolModel<T> {
-
-
     pub fn new(symbols: Vec<T>) -> Self {
         let counts: Vec<u32> = vec![1; symbols.len()];
 
@@ -23,7 +21,7 @@ impl<T: std::cmp::Eq> VectorCountSymbolModel<T> {
             symbols: symbols,
             counts: counts,
             total: length,
-            norm_count: 0
+            norm_count: 0,
         }
     }
 
@@ -54,22 +52,25 @@ impl<T: std::cmp::Eq> VectorCountSymbolModel<T> {
     }
 
     fn normalize(&mut self) {
-        // Need to prevent intervals from getting too small. 
+        // Need to prevent intervals from getting too small.
         // This should be made configurable, but for now just hard coding
         // so that no interval can get smaller than 1/N shown below.
 
-        while self.total >= 1000000 {    
+        while self.total >= 1000000 {
             self.norm_count += 1;
 
             let mut new_total = 0;
             for i in 0..self.symbols.len() {
-                self.counts[i] = if self.counts[i] < 3 {1} else {self.counts[i]/2};
+                self.counts[i] = if self.counts[i] < 3 {
+                    1
+                } else {
+                    self.counts[i] / 2
+                };
                 new_total += self.counts[i];
             }
             self.total = new_total;
         }
     }
-
 }
 
 impl<T: std::cmp::Eq> SymbolModel<T> for VectorCountSymbolModel<T> {
@@ -105,44 +106,44 @@ impl<T: std::cmp::Eq> SymbolModel<T> for VectorCountSymbolModel<T> {
         }
         panic!("Should never happen");
     }
-    
+
     fn total(&self) -> u32 {
         return self.total;
     }
 }
 
-    pub fn ascii_english_letter_weights_1000() -> Vec<u32> {
+pub fn ascii_english_letter_weights_1000() -> Vec<u32> {
     // a..z weights (frequency * 1000), roughly:
     // e=127, t=91, a=82, o=75, i=70, n=67, s=63, h=61, r=60, d=43, l=40,
     // c=28, u=28, m=24, w=24, f=22, g=20, y=20, p=19, b=15, v=10,
     // k=8, j=2, x=2, q=1, z=1
     const W: [u32; 26] = [
-        82, // a
-        15, // b
-        28, // c
-        43, // d
+        82,  // a
+        15,  // b
+        28,  // c
+        43,  // d
         127, // e
-        22, // f
-        20, // g
-        61, // h
-        70, // i
-        2,  // j
-        8,  // k
-        40, // l
-        24, // m
-        67, // n
-        75, // o
-        19, // p
-        1,  // q
-        60, // r
-        63, // s
-        91, // t
-        28, // u
-        10, // v
-        24, // w
-        2,  // x
-        20, // y
-        1,  // z
+        22,  // f
+        20,  // g
+        61,  // h
+        70,  // i
+        2,   // j
+        8,   // k
+        40,  // l
+        24,  // m
+        67,  // n
+        75,  // o
+        19,  // p
+        1,   // q
+        60,  // r
+        63,  // s
+        91,  // t
+        28,  // u
+        10,  // v
+        24,  // w
+        2,   // x
+        20,  // y
+        1,   // z
     ];
 
     let mut table = vec![1u32; 256];
@@ -218,6 +219,5 @@ mod tests {
         assert_eq!(c_interval.1, 23);
         assert_eq!(d_interval.1, 25);
         assert_eq!(e_interval.1, 50);
-
     }
 }
